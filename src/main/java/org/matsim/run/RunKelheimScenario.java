@@ -16,6 +16,7 @@ import org.matsim.api.core.v01.events.PersonScoreEvent;
 import org.matsim.api.core.v01.events.handler.PersonDepartureEventHandler;
 import org.matsim.api.core.v01.network.Link;
 import org.matsim.api.core.v01.network.Network;
+import org.matsim.api.core.v01.network.Node;
 import org.matsim.api.core.v01.population.Person;
 import org.matsim.api.core.v01.population.Population;
 import org.matsim.application.MATSimApplication;
@@ -52,6 +53,7 @@ import org.matsim.core.config.groups.RoutingConfigGroup;
 import org.matsim.core.config.groups.VspExperimentalConfigGroup;
 import org.matsim.core.controler.AbstractModule;
 import org.matsim.core.controler.Controler;
+import org.matsim.core.network.NetworkUtils;
 import org.matsim.core.router.AnalysisMainModeIdentifier;
 import org.matsim.core.scoring.functions.ScoringParametersForPerson;
 import org.matsim.drtFare.KelheimDrtFareModule;
@@ -376,6 +378,37 @@ public class RunKelheimScenario extends MATSimApplication {
 			}
 
 			//controler.addOverridingModule(new DrtEstimatorModule());
+
+
+			 class NetworkModifier {
+
+				private void addHighwayToTheNetwork(Network network) {
+					// Get nodes from the existing network by their IDs
+					Node fromNode = network.getNodes().get(Id.createNodeId("299992218"));
+					Node toNode   = network.getNodes().get(Id.createNodeId("3703557925"));
+
+					// Define basic properties of the new link
+					Id<Link> linkId = Id.createLinkId("myNewHighway");
+					double length = NetworkUtils.getEuclideanDistance(fromNode.getCoord(), toNode.getCoord());
+					double freespeed = 120.0 / 3.6;  // Convert km/h to m/s
+					double capacity = 2000.0;        // vehicles per hour
+					double lanes = 1.0;
+
+					// Create a new link and add it to the network
+					Link newLink = NetworkUtils.createLink(linkId, fromNode, toNode, network,
+						length, freespeed, capacity, lanes);
+
+					// Define allowed transport modes (e.g. car only)
+					newLink.setAllowedModes(Set.of(TransportMode.car));
+
+					// Add the new link to the network
+					network.addLink(newLink);
+
+					System.out.println("New link " + linkId + " successfully added.");
+				}
+			}
+
+
 
 			// TODO: when to include AV?
 			//estimatorConfig.addParameterSet(new DrtEstimatorConfigGroup("av"));
