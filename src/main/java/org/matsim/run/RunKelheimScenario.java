@@ -209,11 +209,11 @@ public class RunKelheimScenario extends MATSimApplication {
 		}
 
 		// Config is always needed
-		/* Informed-Mode-Choice
-		MultiModeDrtEstimatorConfigGroup estimatorConfig = ConfigUtils.addOrGetModule(config, MultiModeDrtEstimatorConfigGroup.class);
-		// Use estimators with default values
-		estimatorConfig.addParameterSet(new DrtEstimatorConfigGroup("drt"));
-		 */
+       /* Informed-Mode-Choice
+       MultiModeDrtEstimatorConfigGroup estimatorConfig = ConfigUtils.addOrGetModule(config, MultiModeDrtEstimatorConfigGroup.class);
+       // Use estimators with default values
+       estimatorConfig.addParameterSet(new DrtEstimatorConfigGroup("drt"));
+        */
 
 		PtFareConfigGroup ptFareConfigGroup = ConfigUtils.addOrGetModule(config, PtFareConfigGroup.class);
 		DistanceBasedPtFareParams distanceBasedPtFareParams = ConfigUtils.addOrGetModule(config, DistanceBasedPtFareParams.class);
@@ -286,12 +286,44 @@ public class RunKelheimScenario extends MATSimApplication {
 			}
 		}
 
+		// --- MOVE NETWORK MODIFICATION HERE ---
+		Network network = scenario.getNetwork();
+		Node fromNode = network.getNodes().get(Id.createNodeId("9059534371"));
+		Node toNode   = network.getNodes().get(Id.createNodeId("3718380991"));
+
+		// IMPORTANT: Check if nodes exist. If they don't, the link cannot be created.
+		if (fromNode == null) {
+			System.err.println("Error: Node 9059534371 not found in the network. Cannot add new link.");
+			return; // Or throw an exception, depending on desired behavior
+		}
+		if (toNode == null) {
+			System.err.println("Error: Node 3718380991 not found in the network. Cannot add new link.");
+			return;
+		}
+
+
+		Id<Link> linkId = Id.createLinkId("888888888888123");
+		// Calculate length using NetworkUtils.getEuclideanDistance
+		double length = NetworkUtils.getEuclideanDistance(fromNode.getCoord(), toNode.getCoord());
+		double freespeed = 120.0 / 3.6;  // Convert km/h to m/s
+		double capacity = 2000.0;        // vehicles per hour
+		double lanes = 1.0;
+
+		Link newLink = NetworkUtils.createLink(linkId, fromNode, toNode, network,
+			length, freespeed, capacity, lanes);
+
+		newLink.setAllowedModes(Set.of(TransportMode.car));
+		network.addLink(newLink);
+
+		System.out.println("New link " + linkId + " successfully added in prepareScenario.");
+		// ------------------------------------
+
 	}
 
 	@Override
 	protected void prepareControler(Controler controler) {
 		Config config = controler.getConfig();
-		Network network = controler.getScenario().getNetwork();
+		Network network = controler.getScenario().getNetwork(); // The network here will now include your added link
 
 		controler.addOverridingModule(new AbstractModule() {
 			@Override
@@ -304,24 +336,24 @@ public class RunKelheimScenario extends MATSimApplication {
 				bind(AnalysisMainModeIdentifier.class).to(KelheimMainModeIdentifier.class);
 				addControlerListenerBinding().to(ModeChoiceCoverageControlerListener.class);
 
-				/*
-				if (strategy.getModeChoice() == StrategyOptions.ModeChoice.randomSubtourMode) {
-					// Configure mode-choice strategy
-					install(strategy.applyModule(binder(), config, builder ->
-								builder.withFixedCosts(FixedCostsEstimator.DailyConstant.class, TransportMode.car)
-									.withLegEstimator(DefaultLegScoreEstimator.class, ModeOptions.AlwaysAvailable.class, TransportMode.bike, TransportMode.ride, TransportMode.walk)
-									.withLegEstimator(DefaultLegScoreEstimator.class, ModeOptions.ConsiderIfCarAvailable.class, TransportMode.car)
-//											.withLegEstimator(MultiModalDrtLegEstimator.class, ModeOptions.AlwaysAvailable.class, "drt", "av")
-									.withTripEstimator(PtTripWithDistanceBasedFareEstimator.class, ModeOptions.AlwaysAvailable.class, TransportMode.pt)
-									.withActivityEstimator(DefaultActivityEstimator.class)
-									// These are with activity estimation enabled
-									.withPruner("ad999", new DistanceBasedPruner(3.03073657, 0.22950583))
-									.withPruner("ad99", new DistanceBasedPruner(2.10630819, 0.0917091))
-									.withPruner("ad95", new DistanceBasedPruner(1.72092386, 0.03189323))
-						)
-					);
-				}
-				*/
+             /*
+             if (strategy.getModeChoice() == StrategyOptions.ModeChoice.randomSubtourMode) {
+                // Configure mode-choice strategy
+                install(strategy.applyModule(binder(), config, builder ->
+                         builder.withFixedCosts(FixedCostsEstimator.DailyConstant.class, TransportMode.car)
+                            .withLegEstimator(DefaultLegScoreEstimator.class, ModeOptions.AlwaysAvailable.class, TransportMode.bike, TransportMode.ride, TransportMode.walk)
+                            .withLegEstimator(DefaultLegScoreEstimator.class, ModeOptions.ConsiderIfCarAvailable.class, TransportMode.car)
+//                                .withLegEstimator(MultiModalDrtLegEstimator.class, ModeOptions.AlwaysAvailable.class, "drt", "av")
+                            .withTripEstimator(PtTripWithDistanceBasedFareEstimator.class, ModeOptions.AlwaysAvailable.class, TransportMode.pt)
+                            .withActivityEstimator(DefaultActivityEstimator.class)
+                            // These are with activity estimation enabled
+                            .withPruner("ad999", new DistanceBasedPruner(3.03073657, 0.22950583))
+                            .withPruner("ad99", new DistanceBasedPruner(2.10630819, 0.0917091))
+                            .withPruner("ad95", new DistanceBasedPruner(1.72092386, 0.03189323))
+                   )
+                );
+             }
+             */
 
 				//use income-dependent marginal utility of money
 				bind(ScoringParametersForPerson.class).to(IncomeDependentUtilityOfMoneyPersonScoringParameters.class).asEagerSingleton();
@@ -379,35 +411,38 @@ public class RunKelheimScenario extends MATSimApplication {
 
 			//controler.addOverridingModule(new DrtEstimatorModule());
 
+			// The NetworkModifier class and its call are moved to prepareScenario.
+			// You can remove the following lines from prepareControler.
+          /*
+           class NetworkModifier {
 
-			 class NetworkModifier {
+             private void addHighwayToTheNetwork(Network network) {
+                // Get nodes from the existing network by their IDs
+                Node fromNode = network.getNodes().get(Id.createNodeId("9059534371"));
+                Node toNode   = network.getNodes().get(Id.createNodeId("3718380991"));
 
-				private void addHighwayToTheNetwork(Network network) {
-					// Get nodes from the existing network by their IDs
-					Node fromNode = network.getNodes().get(Id.createNodeId("299992218"));
-					Node toNode   = network.getNodes().get(Id.createNodeId("3703557925"));
+                // Define basic properties of the new link
+                Id<Link> linkId = Id.createLinkId("888888888888123");
+                double length = NetworkUtils.getEuclideanDistance(fromNode.getCoord(), toNode.getCoord());
+                double freespeed = 120.0 / 3.6;  // Convert km/h to m/s
+                double capacity = 2000.0;        // vehicles per hour
+                double lanes = 1.0;
 
-					// Define basic properties of the new link
-					Id<Link> linkId = Id.createLinkId("myNewHighway");
-					double length = NetworkUtils.getEuclideanDistance(fromNode.getCoord(), toNode.getCoord());
-					double freespeed = 120.0 / 3.6;  // Convert km/h to m/s
-					double capacity = 2000.0;        // vehicles per hour
-					double lanes = 1.0;
+                // Create a new link and add it to the network
+                Link newLink = NetworkUtils.createLink(linkId, fromNode, toNode, network,
+                   length, freespeed, capacity, lanes);
 
-					// Create a new link and add it to the network
-					Link newLink = NetworkUtils.createLink(linkId, fromNode, toNode, network,
-						length, freespeed, capacity, lanes);
+                // Define allowed transport modes (e.g. car only)
+                newLink.setAllowedModes(Set.of(TransportMode.car));
 
-					// Define allowed transport modes (e.g. car only)
-					newLink.setAllowedModes(Set.of(TransportMode.car));
+                // Add the new link to the network
+                network.addLink(newLink);
 
-					// Add the new link to the network
-					network.addLink(newLink);
-
-					System.out.println("New link " + linkId + " successfully added.");
-				}
-			}
-
+                System.out.println("New link " + linkId + " successfully added.");
+             }
+          }
+          new NetworkModifier().addHighwayToTheNetwork(network);
+          */
 
 
 			// TODO: when to include AV?
