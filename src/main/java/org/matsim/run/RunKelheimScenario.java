@@ -16,7 +16,6 @@ import org.matsim.api.core.v01.events.PersonScoreEvent;
 import org.matsim.api.core.v01.events.handler.PersonDepartureEventHandler;
 import org.matsim.api.core.v01.network.Link;
 import org.matsim.api.core.v01.network.Network;
-import org.matsim.api.core.v01.network.Node;
 import org.matsim.api.core.v01.population.Person;
 import org.matsim.api.core.v01.population.Population;
 import org.matsim.application.MATSimApplication;
@@ -138,6 +137,8 @@ public class RunKelheimScenario extends MATSimApplication {
 		super(config);
 	}
 
+
+
 	public RunKelheimScenario() {
 		super(String.format("input/v%s/kelheim-v%s-config.xml", VERSION, VERSION));
 	}
@@ -209,11 +210,11 @@ public class RunKelheimScenario extends MATSimApplication {
 		}
 
 		// Config is always needed
-       /* Informed-Mode-Choice
-       MultiModeDrtEstimatorConfigGroup estimatorConfig = ConfigUtils.addOrGetModule(config, MultiModeDrtEstimatorConfigGroup.class);
-       // Use estimators with default values
-       estimatorConfig.addParameterSet(new DrtEstimatorConfigGroup("drt"));
-        */
+		/* Informed-Mode-Choice
+		MultiModeDrtEstimatorConfigGroup estimatorConfig = ConfigUtils.addOrGetModule(config, MultiModeDrtEstimatorConfigGroup.class);
+		// Use estimators with default values
+		estimatorConfig.addParameterSet(new DrtEstimatorConfigGroup("drt"));
+		 */
 
 		PtFareConfigGroup ptFareConfigGroup = ConfigUtils.addOrGetModule(config, PtFareConfigGroup.class);
 		DistanceBasedPtFareParams distanceBasedPtFareParams = ConfigUtils.addOrGetModule(config, DistanceBasedPtFareParams.class);
@@ -257,14 +258,13 @@ public class RunKelheimScenario extends MATSimApplication {
 	@Override
 	protected void prepareScenario(Scenario scenario) {
 
+		// Allow freight on car links
 		for (Link link : scenario.getNetwork().getLinks().values()) {
 			Set<String> modes = link.getAllowedModes();
 
-			// allow freight traffic together with cars
 			if (modes.contains("car")) {
 				Set<String> newModes = Sets.newHashSet(modes);
 				newModes.add("freight");
-
 				link.setAllowedModes(newModes);
 			}
 		}
@@ -286,44 +286,55 @@ public class RunKelheimScenario extends MATSimApplication {
 			}
 		}
 
-		// --- MOVE NETWORK MODIFICATION HERE ---
+		// --- MODIFY LINK FREESPEED ---
+
 		Network network = scenario.getNetwork();
-		Node fromNode = network.getNodes().get(Id.createNodeId("9059534371"));
-		Node toNode   = network.getNodes().get(Id.createNodeId("3718380991"));
 
-		// IMPORTANT: Check if nodes exist. If they don't, the link cannot be created.
-		if (fromNode == null) {
-			System.err.println("Error: Node 9059534371 not found in the network. Cannot add new link.");
-			return; // Or throw an exception, depending on desired behavior
+// ==== 1. Set specific individual links to 2 km/h。 Policy: Baustelle Simulieren, Tempolimit und nur Werkfahrzeuge durchfahrt erlaubt, nur ein kleines Teil der Donaustr. ====
+		List<String> exact2kmhLinks = List.of("27216118#4", "-27216118#4");
+		double speed2_kmh = 2.0;
+		double speed2_mps = speed2_kmh / 3.6;
+
+		int modifiedCount = 0;
+
+		for (String linkIdStr : exact2kmhLinks) {
+			Link link = network.getLinks().get(Id.createLinkId(linkIdStr));
+			if (link != null) {
+				link.setFreespeed(speed2_mps);
+				System.out.println("✅ Set freespeed of link " + linkIdStr + " to " + speed2_kmh + " km/h.");
+				modifiedCount++;
+			} else {
+				System.err.println("⚠️ Link " + linkIdStr + " not found.");
+			}
 		}
-		if (toNode == null) {
-			System.err.println("Error: Node 3718380991 not found in the network. Cannot add new link.");
-			return;
+
+// ==== 2. Set all links starting with these prefixes to 30 km/h。Policy: 30-Zone der Innenstadt Wohngebiet u. Bahnhofstr. Donau an der Saal ====
+		List<String> prefixes30 = List.of("27216068", "495866124", "27718230");
+		double speed30_kmh = 30.0;
+		double speed30_mps = speed30_kmh / 3.6;
+
+		for (String baseId : prefixes30) {
+			List<String> variants = List.of(baseId, "-" + baseId); // beide Richtungen
+			for (String prefix : variants) {
+				for (Link link : network.getLinks().values()) {
+					String linkIdStr = link.getId().toString();
+					if (linkIdStr.equals(prefix) || linkIdStr.startsWith(prefix + "#")) {    // alle sublinks
+						link.setFreespeed(speed30_mps);
+						System.out.println("✅ Set freespeed of link " + linkIdStr + " to " + speed30_kmh + " km/h.");
+						modifiedCount++;
+					}
+				}
+			}
 		}
 
-
-		Id<Link> linkId = Id.createLinkId("888888888888123");
-		// Calculate length using NetworkUtils.getEuclideanDistance
-		double length = NetworkUtils.getEuclideanDistance(fromNode.getCoord(), toNode.getCoord());
-		double freespeed = 120.0 / 3.6;  // Convert km/h to m/s
-		double capacity = 2000.0;        // vehicles per hour
-		double lanes = 1.0;
-
-		Link newLink = NetworkUtils.createLink(linkId, fromNode, toNode, network,
-			length, freespeed, capacity, lanes);
-
-		newLink.setAllowedModes(Set.of(TransportMode.car));
-		network.addLink(newLink);
-
-		System.out.println("New link " + linkId + " successfully added in prepareScenario.");
-		// ------------------------------------
+		System.out.println("✅ Done. Total modified links: " + modifiedCount);
 
 	}
 
 	@Override
 	protected void prepareControler(Controler controler) {
 		Config config = controler.getConfig();
-		Network network = controler.getScenario().getNetwork(); // The network here will now include your added link
+		Network network = controler.getScenario().getNetwork();
 
 		controler.addOverridingModule(new AbstractModule() {
 			@Override
@@ -335,25 +346,6 @@ public class RunKelheimScenario extends MATSimApplication {
 
 				bind(AnalysisMainModeIdentifier.class).to(KelheimMainModeIdentifier.class);
 				addControlerListenerBinding().to(ModeChoiceCoverageControlerListener.class);
-
-             /*
-             if (strategy.getModeChoice() == StrategyOptions.ModeChoice.randomSubtourMode) {
-                // Configure mode-choice strategy
-                install(strategy.applyModule(binder(), config, builder ->
-                         builder.withFixedCosts(FixedCostsEstimator.DailyConstant.class, TransportMode.car)
-                            .withLegEstimator(DefaultLegScoreEstimator.class, ModeOptions.AlwaysAvailable.class, TransportMode.bike, TransportMode.ride, TransportMode.walk)
-                            .withLegEstimator(DefaultLegScoreEstimator.class, ModeOptions.ConsiderIfCarAvailable.class, TransportMode.car)
-//                                .withLegEstimator(MultiModalDrtLegEstimator.class, ModeOptions.AlwaysAvailable.class, "drt", "av")
-                            .withTripEstimator(PtTripWithDistanceBasedFareEstimator.class, ModeOptions.AlwaysAvailable.class, TransportMode.pt)
-                            .withActivityEstimator(DefaultActivityEstimator.class)
-                            // These are with activity estimation enabled
-                            .withPruner("ad999", new DistanceBasedPruner(3.03073657, 0.22950583))
-                            .withPruner("ad99", new DistanceBasedPruner(2.10630819, 0.0917091))
-                            .withPruner("ad95", new DistanceBasedPruner(1.72092386, 0.03189323))
-                   )
-                );
-             }
-             */
 
 				//use income-dependent marginal utility of money
 				bind(ScoringParametersForPerson.class).to(IncomeDependentUtilityOfMoneyPersonScoringParameters.class).asEagerSingleton();
@@ -409,45 +401,8 @@ public class RunKelheimScenario extends MATSimApplication {
 				}
 			}
 
-			//controler.addOverridingModule(new DrtEstimatorModule());
-
-			// The NetworkModifier class and its call are moved to prepareScenario.
-			// You can remove the following lines from prepareControler.
-          /*
-           class NetworkModifier {
-
-             private void addHighwayToTheNetwork(Network network) {
-                // Get nodes from the existing network by their IDs
-                Node fromNode = network.getNodes().get(Id.createNodeId("9059534371"));
-                Node toNode   = network.getNodes().get(Id.createNodeId("3718380991"));
-
-                // Define basic properties of the new link
-                Id<Link> linkId = Id.createLinkId("888888888888123");
-                double length = NetworkUtils.getEuclideanDistance(fromNode.getCoord(), toNode.getCoord());
-                double freespeed = 120.0 / 3.6;  // Convert km/h to m/s
-                double capacity = 2000.0;        // vehicles per hour
-                double lanes = 1.0;
-
-                // Create a new link and add it to the network
-                Link newLink = NetworkUtils.createLink(linkId, fromNode, toNode, network,
-                   length, freespeed, capacity, lanes);
-
-                // Define allowed transport modes (e.g. car only)
-                newLink.setAllowedModes(Set.of(TransportMode.car));
-
-                // Add the new link to the network
-                network.addLink(newLink);
-
-                System.out.println("New link " + linkId + " successfully added.");
-             }
-          }
-          new NetworkModifier().addHighwayToTheNetwork(network);
-          */
-
-
 			// TODO: when to include AV?
 			//estimatorConfig.addParameterSet(new DrtEstimatorConfigGroup("av"));
-
 		}
 	}
 }
