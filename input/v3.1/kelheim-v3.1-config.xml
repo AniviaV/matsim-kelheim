@@ -6,10 +6,10 @@
     </module>
 
     <module name="controller">
-        <param name="lastIteration" value="0"/>
+        <param name="lastIteration" value="50"/>
         <param name="overwriteFiles" value="failIfDirectoryExists"/>
         <param name="runId" value="Gruppe02"/>
-        <param name="outputDirectory" value="./output/output-kelheim-v3.1-1pct-Gr02-Test07"/>
+        <param name="outputDirectory" value="./output/output-kelheim-v3.1-1pct-Gr02-Project02-fare5-ITER50"/>
         <param name="writeEventsInterval" value="100"/>
         <param name="writePlansInterval" value="100"/>
         <param name="enableLinkToLinkRouting" value="false"/>
@@ -31,6 +31,11 @@
         <param name="inputPlansFile" value="https://svn.vsp.tu-berlin.de/repos/public-svn/matsim/scenarios/countries/de/kelheim/kelheim-v3.0/input/kelheim-v3.0-1pct-plans.xml.gz"/>
         <param name="removingUnnecessaryPlanAttributes" value="true"/>
     </module>
+
+	<module name="roadpricing">
+		<param name="tollLinksFile" value="input/altstadt_cordon.xml"/>
+		<!-- option：<param name="tollRespectsFreespeed" value="true"/> etc -->
+	</module>
 
     <module name="vehicles">
         <param name="vehiclesFile" value="https://svn.vsp.tu-berlin.de/repos/public-svn/matsim/scenarios/countries/de/kelheim/kelheim-v3.0/input/kelheim-v3.0-vehicle-types.xml"/>

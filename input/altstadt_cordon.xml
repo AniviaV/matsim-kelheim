@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<roadpricing type="link" version="1">
+  <description>Kelheim Altstadt cordon; enter-to-pay (all day flat rate)</description>
+
+  <!-- Toll fare -->
+  <cost start_time="00:00" end_time="24:00" amount="5.0"/>
+
+  <tollgedModes>
+	<mode>car</mode>
+  </tollgedModes>
+
+	<!-- Altstadt entrance LinkID -->
+  <links>
+    <link id="-27444024"/>  <!-- Ludwigstr. (West, Mittertor) -->
+    <link id="-39691826"/>   <!-- Donaustr. (Süd, Donautor) -->
+    <link id="-27408737"/>   <!-- Niederdörfl (Ost, Stadtkirche) -->
+	<link id="27408754#0"/>   <!-- NoNameStr (Ost, Stadtkirche) -->
+  </links>
+</roadpricing>

@@ -52,7 +52,6 @@ import org.matsim.core.config.groups.RoutingConfigGroup;
 import org.matsim.core.config.groups.VspExperimentalConfigGroup;
 import org.matsim.core.controler.AbstractModule;
 import org.matsim.core.controler.Controler;
-import org.matsim.core.network.NetworkUtils;
 import org.matsim.core.router.AnalysisMainModeIdentifier;
 import org.matsim.core.scoring.functions.ScoringParametersForPerson;
 import org.matsim.drtFare.KelheimDrtFareModule;
@@ -67,8 +66,15 @@ import picocli.CommandLine;
 import org.matsim.contrib.vsp.pt.fare.DistanceBasedPtFareParams;
 import org.matsim.contrib.vsp.pt.fare.PtFareConfigGroup;
 import playground.vsp.scoring.IncomeDependentUtilityOfMoneyPersonScoringParameters;
+import org.matsim.core.population.PopulationUtils;
+import java.util.HashSet;
+
+// right package address
+import org.matsim.contrib.roadpricing.RoadPricingModule;
+import org.matsim.contrib.roadpricing.RoadPricingConfigGroup;
 
 import javax.annotation.Nullable;
+import java.io.File; // Import the File class
 import java.util.List;
 import java.util.Set;
 import java.util.SplittableRandom;
@@ -93,13 +99,16 @@ public class RunKelheimScenario extends MATSimApplication {
 	private static final double WEIGHT_6_PASSENGER = 18.;
 	private static final double WEIGHT_7_PASSENGER = 1.;
 	private static final double WEIGHT_8_PASSENGER = 0.;
+
+	// Define the base path for your project
+	// <<<<<<<<<<<<<<<< IMPORTANT: Change this to your project's root directory >>>>>>>>>>>>>>>>>>>>>>
+	private static final String BASE_PATH = "C:/Users/Anivi/IdeaProjects/matsim-kelheim-fork/input";
+
 	@CommandLine.Mixin
 	private final SampleOptions sample = new SampleOptions(25, 10, 1);
 
 	@CommandLine.Option(names = "--with-drt", defaultValue = "false", description = "enable DRT service")
 	private boolean drt;
-
-	// a couple of CommandLine.Options below actually are not strictly necessary but rather allow for circumvention of settings directly via config and/or config options.... (ts 07/23)
 
 	/**
 	 * the KEXI service has a zone-dependent fare system which is why we are using a custom fare implementation. Via this option, one can set a flat (constant) price for the AV service.
@@ -137,8 +146,6 @@ public class RunKelheimScenario extends MATSimApplication {
 		super(config);
 	}
 
-
-
 	public RunKelheimScenario() {
 		super(String.format("input/v%s/kelheim-v%s-config.xml", VERSION, VERSION));
 	}
@@ -168,9 +175,15 @@ public class RunKelheimScenario extends MATSimApplication {
 
 		SnzActivities.addScoringParams(config);
 
-		config.controller().setOutputDirectory(sample.adjustName(config.controller().getOutputDirectory()));
-		config.plans().setInputFile(sample.adjustName(config.plans().getInputFile()));
-		config.controller().setRunId(sample.adjustName(config.controller().getRunId()));
+		// --- Road Pricing Configuration for Altstadt Cordon Toll ---
+		RoadPricingConfigGroup rpConfig = ConfigUtils.addOrGetModule(config, RoadPricingConfigGroup.class);
+
+		// toward the fare XML
+		rpConfig.setTollLinksFile(new File(BASE_PATH, "altstadt_cordon.xml").getAbsolutePath());
+
+
+		// --- End of Road Pricing Configuration ---
+
 
 		config.qsim().setFlowCapFactor(sample.getSize() / 100.0);
 		config.qsim().setStorageCapFactor(sample.getSize() / 100.0);
@@ -208,13 +221,6 @@ public class RunKelheimScenario extends MATSimApplication {
 			ConfigUtils.addOrGetModule(config, DvrpConfigGroup.class);
 			DrtConfigs.adjustMultiModeDrtConfig(multiModeDrtConfig, config.scoring(), config.routing());
 		}
-
-		// Config is always needed
-		/* Informed-Mode-Choice
-		MultiModeDrtEstimatorConfigGroup estimatorConfig = ConfigUtils.addOrGetModule(config, MultiModeDrtEstimatorConfigGroup.class);
-		// Use estimators with default values
-		estimatorConfig.addParameterSet(new DrtEstimatorConfigGroup("drt"));
-		 */
 
 		PtFareConfigGroup ptFareConfigGroup = ConfigUtils.addOrGetModule(config, PtFareConfigGroup.class);
 		DistanceBasedPtFareParams distanceBasedPtFareParams = ConfigUtils.addOrGetModule(config, DistanceBasedPtFareParams.class);
@@ -258,16 +264,39 @@ public class RunKelheimScenario extends MATSimApplication {
 	@Override
 	protected void prepareScenario(Scenario scenario) {
 
-		// Allow freight on car links
 		for (Link link : scenario.getNetwork().getLinks().values()) {
 			Set<String> modes = link.getAllowedModes();
 
+			// allow freight traffic together with cars
 			if (modes.contains("car")) {
 				Set<String> newModes = Sets.newHashSet(modes);
 				newModes.add("freight");
+
 				link.setAllowedModes(newModes);
 			}
 		}
+
+		// === add：these 3 link banned car（like in reality） ===
+		String[] blocked = { "27426360", "27392455", "-27456906" };
+		for (String id : blocked) {
+			Link l = scenario.getNetwork().getLinks().get(Id.createLinkId(id));
+			if (l != null) {
+				Set<String> modes = new HashSet<>(l.getAllowedModes());
+				modes.remove("car");          // ban car
+				// if hope freight still able to travel, keep/add：
+				// modes.add("freight");
+				l.setAllowedModes(modes);
+			} else {
+				System.out.println("WARN: link " + id + " not found in network.");
+			}
+		}
+
+		// === IMPORTANT —— clean the unmatched old route against leg.mode，calculate again ===
+		PopulationUtils.checkRouteModeAndReset(
+			scenario.getPopulation(),
+			scenario.getNetwork()
+		);
+		System.out.println("Reset inconsistent routes after network modifications.");
 
 		if (drt) {
 			scenario.getPopulation()
@@ -285,56 +314,17 @@ public class RunKelheimScenario extends MATSimApplication {
 				person.getAttributes().putAttribute("bicycleLove", number);
 			}
 		}
-
-		// --- MODIFY LINK FREESPEED ---
-
-		Network network = scenario.getNetwork();
-
-// ==== 1. Set specific individual links to 2 km/h。 Policy: Baustelle Simulieren, Tempolimit und nur Werkfahrzeuge durchfahrt erlaubt, nur ein kleines Teil der Donaustr. ====
-		List<String> exact2kmhLinks = List.of("27216118#4", "-27216118#4");
-		double speed2_kmh = 2.0;
-		double speed2_mps = speed2_kmh / 3.6;
-
-		int modifiedCount = 0;
-
-		for (String linkIdStr : exact2kmhLinks) {
-			Link link = network.getLinks().get(Id.createLinkId(linkIdStr));
-			if (link != null) {
-				link.setFreespeed(speed2_mps);
-				System.out.println("✅ Set freespeed of link " + linkIdStr + " to " + speed2_kmh + " km/h.");
-				modifiedCount++;
-			} else {
-				System.err.println("⚠️ Link " + linkIdStr + " not found.");
-			}
-		}
-
-// ==== 2. Set all links starting with these prefixes to 30 km/h。Policy: 30-Zone der Innenstadt Wohngebiet u. Bahnhofstr. Donau an der Saal ====
-		List<String> prefixes30 = List.of("27216068", "495866124", "27718230");
-		double speed30_kmh = 30.0;
-		double speed30_mps = speed30_kmh / 3.6;
-
-		for (String baseId : prefixes30) {
-			List<String> variants = List.of(baseId, "-" + baseId); // beide Richtungen
-			for (String prefix : variants) {
-				for (Link link : network.getLinks().values()) {
-					String linkIdStr = link.getId().toString();
-					if (linkIdStr.equals(prefix) || linkIdStr.startsWith(prefix + "#")) {    // alle sublinks
-						link.setFreespeed(speed30_mps);
-						System.out.println("✅ Set freespeed of link " + linkIdStr + " to " + speed30_kmh + " km/h.");
-						modifiedCount++;
-					}
-				}
-			}
-		}
-
-		System.out.println("✅ Done. Total modified links: " + modifiedCount);
-
 	}
 
 	@Override
 	protected void prepareControler(Controler controler) {
 		Config config = controler.getConfig();
 		Network network = controler.getScenario().getNetwork();
+
+		// --- Road Pricing Module ---
+		// 3. Add the road pricing module to the controller's runtime
+		controler.addOverridingModule(new RoadPricingModule());
+		// --- End of Road Pricing Module ---
 
 		controler.addOverridingModule(new AbstractModule() {
 			@Override
@@ -400,9 +390,6 @@ public class RunKelheimScenario extends MATSimApplication {
 					});
 				}
 			}
-
-			// TODO: when to include AV?
-			//estimatorConfig.addParameterSet(new DrtEstimatorConfigGroup("av"));
 		}
 	}
 }
